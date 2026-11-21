@@ -1,0 +1,40 @@
+{
+  "bin": {
+    "agentgate": "dist/src/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.22.0",
+    "zod": "^3.25.0"
+  },
+  "description": "AgentGate \u2014 an MCP security gateway: identity, policy, output screening, and tamper-evident audit in front of any MCP server.",
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "security",
+    "gateway",
+    "proxy",
+    "policy",
+    "audit",
+    "prompt-injection",
+    "ai-agents"
+  ],
+  "license": "MIT",
+  "name": "agentgate",
+  "scripts": {
+    "approvals": "node dist/src/cli.js approvals",
+    "approve": "node dist/src/cli.js approve",
+    "audit": "node dist/src/cli.js audit",
+    "build": "tsc",
+    "demo": "npm run build && node scripts/demo.mjs",
+    "deny": "node dist/src/cli.js deny",
+    "evidence": "node dist/src/cli.js evidence",
+    "start": "node dist/src/index.js",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "type": "module",
+  "version": "1.0.0"
+}
