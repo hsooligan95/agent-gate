@@ -14,6 +14,9 @@
  * Configuration (flags win over env vars):
  *   --policy <path>     policy file            (AGENTGATE_POLICY, default ./policy.json)
  *   --state-dir <path>  audit + approvals dir  (AGENTGATE_STATE_DIR, default ./.agentgate)
+ *   --trace-id <id>     externally supplied trace ID stamped on every audit
+ *                       entry (AGENTGATE_TRACE_ID; default: a fresh random UUID
+ *                       minted per session)
  *   --upstream <cmd...> upstream server command, or everything after `--`
  *                       (AGENTGATE_UPSTREAM, space-separated)
  * Identity: AGENTGATE_TOKEN must match one agent in the policy file.
@@ -42,18 +45,20 @@ function parseArgs(argv: string[]) {
   let upstream = sep === -1 ? [] : argv.slice(sep + 1);
   let policyPath = process.env.AGENTGATE_POLICY ?? "policy.json";
   let stateDir = process.env.AGENTGATE_STATE_DIR ?? ".agentgate";
+  let traceId = process.env.AGENTGATE_TRACE_ID || undefined;
   for (let i = 0; i < flagArgs.length; i++) {
     if (flagArgs[i] === "--policy") policyPath = flagArgs[++i];
     else if (flagArgs[i] === "--state-dir") stateDir = flagArgs[++i];
+    else if (flagArgs[i] === "--trace-id") traceId = flagArgs[++i];
     else if (flagArgs[i] === "--upstream") upstream = flagArgs.slice(i + 1), (i = flagArgs.length);
   }
   if (upstream.length === 0 && process.env.AGENTGATE_UPSTREAM) {
     upstream = process.env.AGENTGATE_UPSTREAM.split(" ").filter(Boolean);
   }
-  return { policyPath, stateDir, upstream };
+  return { policyPath, stateDir, upstream, traceId };
 }
 
-const { policyPath, stateDir, upstream } = parseArgs(process.argv.slice(2));
+const { policyPath, stateDir, upstream, traceId: suppliedTraceId } = parseArgs(process.argv.slice(2));
 const log = (msg: string) => process.stderr.write(`[agentgate] ${msg}\n`);
 
 if (upstream.length === 0) {
@@ -70,7 +75,7 @@ if (!agent) {
 
 mkdirSync(stateDir, { recursive: true });
 const audit = new AuditLog(`${stateDir}/audit.jsonl`);
-const traceId = randomUUID();
+const traceId = suppliedTraceId ?? randomUUID();
 audit.append("session_start", traceId, {
   agent: agent.name,
   upstream: upstream.join(" "),
