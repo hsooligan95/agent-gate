@@ -37,6 +37,11 @@ export function entryHash(entryWithoutHash: Record<string, unknown>): string {
 export class AuditLog {
   private seq = 0;
   private lastHash = GENESIS_HASH;
+  // Instance identity for fleet rollups (AgentTrace): which process
+  // of this gateway wrote the entry. From the shared AGENT_INSTANCE
+  // env var; "default" when unset. Resolved once -- one process is
+  // one instance for its whole life.
+  private readonly instance = process.env.AGENT_INSTANCE || "default";
 
   constructor(private readonly path: string) {
     if (existsSync(path)) {
@@ -55,6 +60,7 @@ export class AuditLog {
       ts: new Date().toISOString(),
       traceId,
       type,
+      instance: this.instance,
       ...fields,
       prevHash: this.lastHash,
     };
