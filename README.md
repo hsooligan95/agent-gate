@@ -52,7 +52,7 @@ a `Client` upstream, proxying over stdio.
 ```bash
 npm install
 npm run build
-npm test          # 17 tests: policy, screening, audit chain (incl. tamper case)
+npm test          # 29 tests: policy, screening, audit chain (incl. tamper case), broker verification
 npm run demo      # the full story, no API keys, no network — output below
 ```
 
@@ -211,6 +211,31 @@ One deliberate detail: the audit log records screening *pattern names* and
 injection excerpts, but never raw PII values — the log itself must not
 become a PII leak.
 
+## Interlocks
+
+**CredBroker → AgentGate (optional, off by default).** AgentGate governs
+what an agent may *do*; [CredBroker](https://github.com/hsooligan95/cred-broker)
+governs what it may *hold*. Broker mode (`--broker` or
+`AGENTGATE_BROKER=1`) composes them: any call policy would let execute
+must also present a valid CredBroker token, bound to this gateway's
+agent identity and session trace ID, whose granted scope covers the
+call — resource `tool/<tool name>`, action `call`, so a token granted
+`tool/*` covers everything and `tool/get_cost_summary` covers exactly
+one tool. Verification re-implements CredBroker's own semantics in
+TypeScript (`src/broker.ts`) against its documented token format —
+checks in the broker's order: signature → expiry → revocation →
+binding → scope, failing closed — and the verdict lands on the audit
+log's `policy_decision` record, which gains the broker grant ID
+(`brokerJti`) on success or the broker's reason on denial. With no
+token configured, the gateway refuses to start. Run the end-to-end
+demo (tokens minted by the real Python broker via its `mint_cli`,
+verified here) with `npm run demo:broker`; captured output is in
+`demo-broker-output.txt`. This is a local bridge between two demos:
+the shared HMAC key is the synthetic demo key, and revocation crosses
+as a plain jti list file — a production design would use asymmetric
+signing or a broker introspection endpoint so the verifier never
+holds minting power.
+
 ## Layout
 
 ```text
@@ -219,10 +244,12 @@ src/policy.ts      policy loading, authentication, decision evaluation
 src/screen.ts      injection + PII pattern screening and redaction
 src/approvals.ts   the file-based human approval queue
 src/audit.ts       hash-chained JSONL audit log + chain verification
+src/broker.ts      optional CredBroker token verification (broker mode)
 src/cli.ts         operator CLI: approvals, approve/deny, audit verify, evidence
 demo-upstream/     mock MCP server for the demo (incl. the poisoned tool)
 scripts/demo.mjs   the scripted end-to-end demo
-test/              node:test suites for policy, screening, and the audit chain
+scripts/demo-broker.mjs  the CredBroker interlock demo (needs sibling cred-broker)
+test/              node:test suites for policy, screening, audit chain, broker
 policy.json        the shipped demo policy (two agents, commented)
 ```
 

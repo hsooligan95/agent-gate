@@ -1,0 +1,45 @@
+=== AgentGate × CredBroker demo (broker mode) ===
+state dir (audit + approvals): /tmp/agentgate-broker-demo-ZSy3mg
+tokens minted by: /home/hatch/workspace/github-portfolio/cred-broker/src/credbroker/mint_cli.py
+
+— 1. no CredBroker token presented: the gateway refuses to start —
+  gateway: [agentgate] CredBroker broker mode: broker mode is on but no CredBroker token was presented (set AGENTGATE_BROKER_TOKEN or AGENTGATE_BROKER_TOKEN_FILE). Refusing to start (fail closed).
+  ✓ no token -> gateway exits 2, fail closed, before any upstream connection
+
+— 2. valid token with covering scope (tool/*): calls execute —
+  cred-broker: minted cred-0001 for agent 'demo-agent': resource tool/*, ttl 3600s -> /tmp/agentgate-broker-demo-ZSy3mg/token-full.txt
+[agentgate] session trace-gate-broker-demo — agent 'demo-agent' via policy v1
+[agentgate] broker mode on — CredBroker grant cred-0001 required per call
+[agentgate] connected to upstream: /usr/bin/node /home/hatch/workspace/github-portfolio/agent-gate/demo-upstream/server.mjs
+[agentgate] gateway ready on stdio
+  ✓ list_resources allowed by policy AND broker, executed
+  ✓ get_cost_summary executed ($463.07)
+
+— 3. valid token with narrower scope (tool/get_cost_summary only) —
+  cred-broker: minted cred-0001 for agent 'demo-agent': resource tool/get_cost_summary, ttl 3600s -> /tmp/agentgate-broker-demo-ZSy3mg/token-narrow.txt
+[agentgate] session trace-gate-broker-demo — agent 'demo-agent' via policy v1
+[agentgate] broker mode on — CredBroker grant cred-0001 required per call
+[agentgate] connected to upstream: /usr/bin/node /home/hatch/workspace/github-portfolio/agent-gate/demo-upstream/server.mjs
+[agentgate] gateway ready on stdio
+  ✓ the one covered tool still executes — the token works
+  -> AgentGate: DENIED — CredBroker: resource 'tool/list_resources' is outside the token's scope 'tool/get_cost_summary'
+  ✓ list_resources DENIED on broker scope (policy alone would have allowed it)
+
+— 4. expired token: denied by the broker check —
+  cred-broker: minted cred-0001 for agent 'demo-agent': resource tool/*, ttl 3600s (already expired) -> /tmp/agentgate-broker-demo-ZSy3mg/token-expired.txt
+[agentgate] session trace-gate-broker-demo — agent 'demo-agent' via policy v1
+[agentgate] broker mode on — CredBroker grant cred-0001 required per call
+[agentgate] connected to upstream: /usr/bin/node /home/hatch/workspace/github-portfolio/agent-gate/demo-upstream/server.mjs
+[agentgate] gateway ready on stdio
+  -> AgentGate: DENIED — CredBroker: token expired at 1577840400 (now 1795321258)
+  ✓ expired token DENIED with the broker's reason
+
+— 5. decision records carry the broker grant ID —
+  policy_decision for list_resources: brokerOk=true, brokerJti=cred-0001
+  ✓ the allowed call's decision record carries grant cred-0001
+  denied decision: brokerOk=false, brokerReason=resource 'tool/list_resources' is outside the token's scope 'tool/get_cost_summary'
+  ✓ the scope denial is on the decision record too
+  Audit chain OK — 11 entries, every hash verified.
+  ✓ audit hash chain verifies
+
+=== BROKER DEMO OK — every step passed ===

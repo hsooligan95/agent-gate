@@ -17,6 +17,11 @@
  *   --trace-id <id>     externally supplied trace ID stamped on every audit
  *                       entry (AGENTGATE_TRACE_ID; default: a fresh random UUID
  *                       minted per session)
+ *   --broker            broker mode (AGENTGATE_BROKER=1): every executable
+ *                       call must also present a valid CredBroker token
+ *                       bound to this agent + trace ID whose scope covers
+ *                       the call (see src/broker.ts for the AGENTGATE_BROKER_*
+ *                       env vars). Off by default.
  *   --upstream <cmd...> upstream server command, or everything after `--`
  *                       (AGENTGATE_UPSTREAM, space-separated)
  * Identity: AGENTGATE_TOKEN must match one agent in the policy file.
@@ -35,6 +40,7 @@ import {
   type CallToolResult,
 } from "@modelcontextprotocol/sdk/types.js";
 import { AuditLog } from "./audit.js";
+import { loadBrokerConfig, peekJti, verifyBrokerToken, type BrokerConfig } from "./broker.js";
 import { createApproval, waitForDecision } from "./approvals.js";
 import { authenticate, evaluate, globMatch, loadPolicy } from "./policy.js";
 import { screenText, type Finding } from "./screen.js";
@@ -46,19 +52,21 @@ function parseArgs(argv: string[]) {
   let policyPath = process.env.AGENTGATE_POLICY ?? "policy.json";
   let stateDir = process.env.AGENTGATE_STATE_DIR ?? ".agentgate";
   let traceId = process.env.AGENTGATE_TRACE_ID || undefined;
+  let broker = process.env.AGENTGATE_BROKER === "1";
   for (let i = 0; i < flagArgs.length; i++) {
     if (flagArgs[i] === "--policy") policyPath = flagArgs[++i];
     else if (flagArgs[i] === "--state-dir") stateDir = flagArgs[++i];
     else if (flagArgs[i] === "--trace-id") traceId = flagArgs[++i];
+    else if (flagArgs[i] === "--broker") broker = true;
     else if (flagArgs[i] === "--upstream") upstream = flagArgs.slice(i + 1), (i = flagArgs.length);
   }
   if (upstream.length === 0 && process.env.AGENTGATE_UPSTREAM) {
     upstream = process.env.AGENTGATE_UPSTREAM.split(" ").filter(Boolean);
   }
-  return { policyPath, stateDir, upstream, traceId };
+  return { policyPath, stateDir, upstream, traceId, broker };
 }
 
-const { policyPath, stateDir, upstream, traceId: suppliedTraceId } = parseArgs(process.argv.slice(2));
+const { policyPath, stateDir, upstream, traceId: suppliedTraceId, broker: brokerMode } = parseArgs(process.argv.slice(2));
 const log = (msg: string) => process.stderr.write(`[agentgate] ${msg}\n`);
 
 if (upstream.length === 0) {
@@ -76,12 +84,30 @@ if (!agent) {
 mkdirSync(stateDir, { recursive: true });
 const audit = new AuditLog(`${stateDir}/audit.jsonl`);
 const traceId = suppliedTraceId ?? randomUUID();
+
+// Broker mode (optional, off by default): a CredBroker token must be
+// presented and configured before anything runs — missing key or token
+// stops the gateway from starting, exactly like an unknown agent token.
+let brokerConfig: BrokerConfig | null = null;
+if (brokerMode) {
+  const loaded = loadBrokerConfig();
+  if ("error" in loaded) {
+    log(`CredBroker broker mode: ${loaded.error}. Refusing to start (fail closed).`);
+    process.exit(2);
+  }
+  brokerConfig = loaded;
+}
+
 audit.append("session_start", traceId, {
   agent: agent.name,
   upstream: upstream.join(" "),
   policyVersion: policy.version,
+  ...(brokerConfig ? { brokerJti: peekJti(brokerConfig.token!) ?? null } : {}),
 });
 log(`session ${traceId} — agent '${agent.name}' via policy v${policy.version}`);
+if (brokerConfig) {
+  log(`broker mode on — CredBroker grant ${peekJti(brokerConfig.token!) ?? "?"} required per call`);
+}
 
 // --- Connect upstream -------------------------------------------------------
 const upstreamClient = new Client({ name: "agentgate", version: "1.0.0" }, { capabilities: {} });
@@ -116,6 +142,26 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const args = (request.params.arguments ?? {}) as Record<string, unknown>;
   const callId = randomUUID();
   const decision = evaluate(policy, agent, tool, args);
+
+  // Broker mode: policy alone no longer suffices — a call policy would
+  // let execute (allow, or pending a human approval) must also carry a
+  // valid CredBroker grant covering it. The check runs before the
+  // approval branch: there is no point asking a human to approve a
+  // call that holds no credential. The verdict lands on the decision
+  // record either way.
+  let brokerDenial: string | undefined;
+  let brokerFields: Record<string, unknown> = {};
+  if (brokerConfig && decision.effect !== "deny") {
+    const verdict = verifyBrokerToken(brokerConfig, { agent: agent.name, traceId, tool });
+    brokerFields = {
+      brokerRequired: true,
+      brokerOk: verdict.ok,
+      brokerJti: verdict.jti ?? null,
+      ...(verdict.ok ? {} : { brokerReason: verdict.reason }),
+    };
+    if (!verdict.ok) brokerDenial = verdict.reason;
+  }
+
   audit.append("policy_decision", traceId, {
     callId,
     agent: agent.name,
@@ -124,10 +170,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     effect: decision.effect,
     stage: decision.stage,
     reason: decision.reason,
+    ...brokerFields,
   });
 
   if (decision.effect === "deny") {
     return errorResult(`AgentGate: DENIED — ${decision.reason}`);
+  }
+
+  if (brokerDenial) {
+    return errorResult(`AgentGate: DENIED — CredBroker: ${brokerDenial}`);
   }
 
   if (decision.effect === "require-approval") {

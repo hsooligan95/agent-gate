@@ -30,6 +30,7 @@
     "audit": "node dist/src/cli.js audit",
     "build": "tsc",
     "demo": "npm run build && node scripts/demo.mjs",
+    "demo:broker": "npm run build && node scripts/demo-broker.mjs",
     "deny": "node dist/src/cli.js deny",
     "evidence": "node dist/src/cli.js evidence",
     "start": "node dist/src/index.js",
