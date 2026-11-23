@@ -4,12 +4,12 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.22.0",
-    "zod": "^3.25.0"
+    "zod": "^4.6.7"
   },
   "description": "AgentGate \u2014 an MCP security gateway: identity, policy, output screening, and tamper-evident audit in front of any MCP server.",
   "devDependencies": {
-    "@types/node": "^24.0.0",
-    "typescript": "^5.9.0"
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
   },
   "keywords": [
     "mcp",
